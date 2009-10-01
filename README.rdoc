@@ -18,25 +18,47 @@ Then, in your ActiveRecord model you just need to include the module
 and provide the column to use when generating the slug.  For example, 
 if we had a Post model with:
 
-    class Post < ActiveRecord::Base
+    class Blog < ActiveRecord::Base
       # Columns:
-      #  title: string
-      #  body:  text
-      #  slug:  string
+      #  name: string
+      #  slug: string
   
       include Sluggable
-      slug_column :title
+      slug_from :name
   
       before_validation :generate_slug
   
     end
 
-This sets it up so that the value of the `title` column is used as the
+This sets it up so that the value of the `name` column is used as the
 source when generating the slug.  The module also provides a private
 method (`generate_slug`) to generate and store the slug for this record.  
 It requires that the table have a column called `slug` and is typically
 called in a lifecycle hook, though it can be called from anywhere you 
 need it.
+
+If you have a model that allows the same slug when scoped to another
+associated model, you can provide a parameter as part of the `slug_from`
+method:
+
+    class Post < ActiveRecord::Base
+      # Columns:
+      #  blog_id: integer
+      #  title:   string
+      #  body:    text
+      #  slug:    string
+
+      belongs_to :blog
+      
+      include Sluggable
+      slug_from :title, :scope => :blog_id
+      
+      before_validation :generate_slug
+      
+    end
+
+This will allow the same slug to be generated for 2 posts each scoped to
+a different blog.
 
 == License
 

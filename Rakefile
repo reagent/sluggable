@@ -24,7 +24,28 @@ Rake::GemPackageTask.new(spec) do |pkg|
   pkg.gem_spec = spec
 end
 
-Rake::TestTask.new do |t|
+namespace :db do
+  desc 'Create the test database'
+  task :create do
+    require 'activerecord'
+    require 'test/support/configuration'
+
+    path = File.dirname(__FILE__) + '/test/support'
+
+    ActiveRecord::Base.establish_connection(Configuration.database(path))
+    ActiveRecord::Base.connection
+
+    load(File.dirname(__FILE__) + '/test/support/database.rb')
+  end
+
+  task :drop do
+    Dir[File.dirname(__FILE__) + '/test/support/*.sqlite3'].each {|f| FileUtils.rm(f) }
+  end
+  
+  task :reset => [:drop, :create]
+end
+
+Rake::TestTask.new(:test => 'db:reset') do |t|
   t.libs << 'test'
   t.test_files = FileList["test/**/*_test.rb"]
   t.verbose = true
@@ -33,7 +54,7 @@ end
 begin
   require 'rcov/rcovtask'
 
-  Rcov::RcovTask.new(:coverage) do |t|
+  Rcov::RcovTask.new(:coverage => 'db:reset') do |t|
     t.libs       = ['test']
     t.test_files = FileList["test/**/*_test.rb"]
     t.verbose    = true

@@ -1,80 +1,129 @@
 require File.dirname(__FILE__) + '/../test_helper'
 
-class SluggableImplementation
+class Blog < ActiveRecord::Base
+
   include Sluggable
+  slug_from :name
+
+end
+
+class Post < ActiveRecord::Base
+
+  include Sluggable
+  slug_from :title, :scope => :blog_id
+
 end
 
 class SluggableImplementationTest < Test::Unit::TestCase
-  
-  def stub_others_by_slug(id, *slugs)
-    slugs.each do |slug|
-      return_val = (slug == slugs.last) ? nil : stub()
-      SluggableImplementation.stubs(:others_by_slug).with(@id, slug).returns(return_val)
+
+  context "An instance of the Blog class" do
+    teardown { Blog.destroy_all }
+
+    should "know the column to use when generating the slug" do
+      Blog.new.slug_source.should == :name
     end
-  end
-  
-  context "The SluggableImplmentation class" do
-    setup do
-      @object = stub()
-      @slug   = 'sample-slug'
+
+    should "know the scope for finding the uniqueness of the slug" do
+      Blog.new.slug_scope.should == []
     end
-    
-    should "be able to find others by slug when provided an ID" do
-      id = 1
-      SluggableImplementation.expects(:find_by_slug).with(@slug, {:conditions => ['id != ?', id]}).returns(@object)
-      assert_equal @object, SluggableImplementation.others_by_slug(id, @slug)
+
+    should "know how to generate the conditions for a column when it exists" do
+      blog = Blog.create!(:name => 'Mine')
+      blog.conditions_for(:id).should == ['id = ?', blog.id]
     end
     
-    should "be able to find others by slug when not provided an ID" do
-      SluggableImplementation.expects(:find_by_slug).with(@slug, {}).returns(@object)
-      assert_equal @object, SluggableImplementation.others_by_slug(nil, @slug)
+    should "know how to generate the conditions for a column when it should not be included" do
+      blog = Blog.create!(:name => 'Mine')
+      blog.conditions_for(:id, false).should == ['id != ?', blog.id]
     end
-    
-    should "be able to record the column for use when generating the slug" do
-      SluggableImplementation.slug_column :title
-      @sluggable = SluggableImplementation.new
-      
-      assert_equal :title, @sluggable.slug_column
+
+    should "know how to generate the conditions for a column when it doesn't exist" do
+      blog = Blog.new
+      blog.conditions_for(:id).should be_nil
     end
-    
-  end
-  
-  context "An instance of SluggableImplementation" do
-    
-    setup do
-      @id   = 1
-      @slug = 'title'
-      
-      @sluggable = SluggableImplementation.new
-      @sluggable.stubs(:id).returns(@id)
+
+    should "generate an empty set of conditions when there is no id" do
+      blog = Blog.new
+      blog.slug_conditions.should == {}
     end
-    
+
+    should "generate a set of conditions when there is an ID" do
+      blog = Blog.create!(:name => 'Me')
+      blog.slug_conditions.should == {:conditions => ['id != ?', blog.id]}
+    end
+
     should "know the next available slug when the original is taken" do
-      stub_others_by_slug(@id, 'title', 'title-2')
-      assert_equal "title-2", @sluggable.send(:next_available_slug, 'title')
+      Blog.create!(:name => 'One', :slug => 'one')
+
+      blog = Blog.new
+      blog.send(:next_available_slug, 'one').should == 'one-2'
     end
-    
+
     should "incrementally suggest slugs until it finds an available one" do
-      stub_others_by_slug(@id, 'title', 'title-2', 'title-3')
-      assert_equal 'title-3', @sluggable.send(:next_available_slug, 'title')
+      Blog.create!(:name => 'One', :slug => 'one')
+      Blog.create!(:name => 'One', :slug => 'one-2')
+
+      blog = Blog.new
+
+      blog.send(:next_available_slug, 'one').should == 'one-3'
     end
-    
+
     should "know not to suggest an incremental slug when the existing slug belongs to the current record" do
-      SluggableImplementation.stubs(:id).with().returns(@id)
-      SluggableImplementation.stubs(:others_by_slug).with(@id, @slug).returns(nil)
+      blog = Blog.create!(:name => 'One', :slug => 'one')
+      blog.send(:next_available_slug, 'one').should == 'one'
+    end
+
+    should "be able to assign a valid slug to the slug property" do
+      blog = Blog.new(:name => 'One')
+      blog.send(:generate_slug)
       
-      assert_equal @slug, @sluggable.send(:next_available_slug, @slug)
+      blog.slug.should == 'one'
+    end
+
+  end
+
+  context "An instance of the Post class" do
+    teardown do
+      Post.destroy_all
+      Blog.destroy_all
+    end
+  
+    should "know the scope for finding the uniqueness of the slug" do
+      Post.new.slug_scope.should == [:blog_id]
+    end
+  
+    should "be able to generate a set of conditions when there is no ID" do
+      p = Post.new(:blog_id => 1)
+      p.slug_conditions.should == {:conditions => ['blog_id = ?', 1]}
+    end
+  
+    should "be able to generate a set of conditions when there is an ID" do
+      p = Post.create!(:title => 'Title', :body => 'Text', :blog_id => 1)
+      p.slug_conditions.should == {:conditions => ['id != ? AND blog_id = ?', p.id, 1]}
     end
     
-    should "be able to assign a valid slug to the slug property" do
-      @sluggable.stubs(:slug_column).with().returns(:title)
-      @sluggable.stubs(:title).with().returns(stub(:sluggify => @slug))
-      @sluggable.stubs(:next_available_slug).with(@slug).returns(@slug)
-      @sluggable.expects(:slug=).with(@slug)
+    should "maintain the current slug when one exists scoped to another blog_id" do
+      Post.create!(:title => 'Title', :body => 'Text', :blog_id => 1, :slug => 'title')
+      p = Post.new(:title => 'Title', :body => 'Text', :blog_id => 2)
       
-      @sluggable.send(:generate_slug)
+      p.send(:generate_slug)
+      
+      p.slug.should == 'title'
+    end
+    
+    should "increment the slug when one exists scoped to the same blog" do
+      Post.create!(:title => 'Title', :body => 'Text', :blog_id => 1, :slug => 'title')
+      p = Post.new(:title => 'Title', :body => 'Text', :blog_id => 1)
+
+      p.send(:generate_slug)
+      
+      p.slug.should == 'title-2'
     end
     
   end
-  
+
+
 end
+
+
+
